@@ -161,6 +161,9 @@ const patterns = [
   }
 ];
 
+// ── Config ─────────────────────────────────────────────────
+const WORKER_URL = "https://prompt-intelligence-worker.londonxofc.workers.dev";
+
 // ── State ──────────────────────────────────────────────────
 let currentBox = null;
 let debounceTimer = null;
@@ -189,6 +192,9 @@ function createSuggestionBox(target, pattern) {
       <button class="pih-close" aria-label="Dismiss">✕</button>
     </div>
     <div class="pih-options">${optionsHTML}</div>
+    <div class="pih-footer">
+      <button class="pih-ai-btn" id="pih-refine-btn">✦ Refine with AI</button>
+    </div>
   `;
 
   document.body.appendChild(box);
@@ -207,7 +213,52 @@ function createSuggestionBox(target, pattern) {
     });
   });
 
+  // AI Refine button
+  box.querySelector("#pih-refine-btn").addEventListener("click", () => {
+    refineWithAI(target);
+  });
+
   currentBox = box;
+}
+
+// ── AI Refinement ───────────────────────────────────────────
+async function refineWithAI(target) {
+  const prompt = (target.value || target.innerText || target.textContent || "").trim();
+  if (!prompt) return;
+
+  const btn = currentBox?.querySelector("#pih-refine-btn");
+  if (btn) {
+    btn.textContent = "✦ Refining...";
+    btn.disabled = true;
+  }
+
+  try {
+    const res = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+
+    const data = await res.json();
+
+    if (data.refined) {
+      // Replace the entire input with the refined version
+      if (target.isContentEditable) {
+        target.focus();
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, data.refined);
+      } else {
+        target.value = data.refined;
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      target.focus();
+      removeSuggestionBox();
+    } else {
+      if (btn) { btn.textContent = "✦ Try again"; btn.disabled = false; }
+    }
+  } catch {
+    if (btn) { btn.textContent = "✦ Error — retry"; btn.disabled = false; }
+  }
 }
 
 function positionBox(box, target) {
@@ -300,8 +351,8 @@ function attachToTarget(target) {
 function scanForInputs() {
   // Standard textareas
   document.querySelectorAll("textarea").forEach(attachToTarget);
-  // Contenteditable divs (Claude, Gemini use these)
-  document.querySelectorAll("[contenteditable='true']").forEach(attachToTarget);
+  // Contenteditable divs (Claude, Gemini, ChatGPT use these — match any value)
+  document.querySelectorAll("[contenteditable]").forEach(attachToTarget);
 }
 
 function init() {
