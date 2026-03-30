@@ -1,6 +1,6 @@
 // ============================================================
 // Prompt Intelligence Worker — Cloudflare Edge AI Refiner
-// Receives vague prompt text → returns polished technical version
+// Rate limited: 20 requests per IP per day via KV
 // ============================================================
 
 const CORS_HEADERS = {
@@ -9,6 +9,26 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+const DAILY_LIMIT = 20;
+
+// ── Rate Limiter ────────────────────────────────────────────
+async function checkRateLimit(env, ip) {
+  const today = new Date().toISOString().slice(0, 10); // "2026-03-30"
+  const key = `rl:${ip}:${today}`;
+
+  const current = await env.RATE_LIMITS.get(key);
+  const count = current ? parseInt(current) : 0;
+
+  if (count >= DAILY_LIMIT) {
+    return { allowed: false, count, remaining: 0 };
+  }
+
+  // Increment with 25hr TTL (covers timezone edge cases)
+  await env.RATE_LIMITS.put(key, String(count + 1), { expirationTtl: 90000 });
+  return { allowed: true, count: count + 1, remaining: DAILY_LIMIT - count - 1 };
+}
+
+// ── Main Handler ────────────────────────────────────────────
 export default {
   async fetch(request, env) {
     // Handle CORS preflight
@@ -23,6 +43,32 @@ export default {
       });
     }
 
+    // Get client IP
+    const ip = request.headers.get("CF-Connecting-IP") ||
+                request.headers.get("X-Forwarded-For") ||
+                "unknown";
+
+    // Check rate limit
+    const { allowed, remaining } = await checkRateLimit(env, ip);
+    if (!allowed) {
+      return new Response(
+        JSON.stringify({
+          error: "Daily limit reached",
+          message: `You've used all ${DAILY_LIMIT} AI refinements for today. Resets at midnight UTC.`,
+        }),
+        {
+          status: 429,
+          headers: {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json",
+            "X-RateLimit-Limit": String(DAILY_LIMIT),
+            "X-RateLimit-Remaining": "0",
+          },
+        }
+      );
+    }
+
+    // Parse body
     let body;
     try {
       body = await request.json();
@@ -80,9 +126,14 @@ Rules:
     const data = await anthropicRes.json();
     const refined = data?.content?.[0]?.text?.trim() || "";
 
-    return new Response(JSON.stringify({ refined }), {
+    return new Response(JSON.stringify({ refined, remaining }), {
       status: 200,
-      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json",
+        "X-RateLimit-Limit": String(DAILY_LIMIT),
+        "X-RateLimit-Remaining": String(remaining),
+      },
     });
   },
 };
