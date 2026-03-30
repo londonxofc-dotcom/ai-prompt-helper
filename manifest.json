@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Prompt Intelligence Helper",
+  "version": "1.5",
+  "description": "Detects vague phrases while you type and suggests precise technical terminology before sending prompts to AI.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "*://*.openai.com/*",
+    "*://*.chat.openai.com/*",
+    "*://*.claude.ai/*",
+    "*://*.gemini.google.com/*",
+    "*://*.perplexity.ai/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.openai.com/*",
+        "*://*.chat.openai.com/*",
+        "*://*.claude.ai/*",
+        "*://*.gemini.google.com/*",
+        "*://*.perplexity.ai/*"
+      ],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Prompt Intelligence Helper"
+  }
+}
